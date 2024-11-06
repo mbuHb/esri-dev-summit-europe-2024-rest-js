@@ -1,0 +1,29 @@
+{
+  "private": true,
+  "name": "portal-node-cli",
+  "version": "1.0.0",
+  "description": "arcgis-rest-js node command-line for portal management",
+  "license": "Apache-2.0",
+  "keywords": [
+    "arcgis",
+    "arcgis-rest-js",
+    "node"
+  ],
+  "main": "portal.js",
+  "bin": {
+    "portal": "./portal.js"
+  },
+  "scripts": {
+    "start": "echo \"CLI - node portal.js exec <command> -s <param>\" && exit 1"
+  },
+  "dependencies": {
+    "@esri/arcgis-rest-portal": "^4.0.0",
+    "@esri/arcgis-rest-request": "^4.0.0",
+    "chalk": "^2.3.0",
+    "commander": "^2.12.2",
+    "cross-fetch": "^3.0.0",
+    "dotenv": "^16.4.5",
+    "isomorphic-form-data": "^1.0.0"
+  },
+  "author": "Mantas Bukauskas <mbukauskas@hnit-baltic.lt>"
+}

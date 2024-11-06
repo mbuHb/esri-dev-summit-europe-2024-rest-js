@@ -1,0 +1,312 @@
+<!--
+
+https://developers.arcgis.com/openlayers/places/find-places-nearby/
+
+To run this demo, you need to replace 'YOUR_ACCESS_TOKEN' with an access token from ArcGIS that has the correct privileges.
+
+To get started, sign up for a free ArcGIS Location Platform account or a free trial of ArcGIS Online and create developer credentials.
+
+https://developers.arcgis.com/documentation/security-and-authentication/get-started/
+
+-->
+
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no" />
+
+    <!-- Load OpenLayers from CDN -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@v10.1.0/ol.css" type="text/css" />
+    <script src="https://cdn.jsdelivr.net/npm/ol@v10.1.0/dist/ol.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/ol-mapbox-style@12.3.5/dist/olms.js"></script>
+    <script src="https://unpkg.com/ol-popup@5.1.1/dist/ol-popup.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/ol-popup@5.1.1/src/ol-popup.css" />
+    <!-- Calcite components -->
+    <script type="module" src=https://js.arcgis.com/calcite-components/2.12.1/calcite.esm.js></script>
+    <link rel="stylesheet" type="text/css" href=https://js.arcgis.com/calcite-components/2.12.1/calcite.css />
+
+    <!-- ArcGIS REST JS: request and places -->
+    <script src="https://unpkg.com/@esri/arcgis-rest-request@4.0.0/dist/bundled/request.umd.js"></script>
+    <script src="https://unpkg.com/@esri/arcgis-rest-places@1.0.0/dist/bundled/places.umd.js"></script>
+
+    <style>
+      body {
+          margin: 0;
+          padding: 0;
+          width:100%;
+          height:100%;
+          display:flex;
+          flex-direction:row;
+      }
+
+      #map {
+          position:absolute;
+
+          left:350px;
+
+          top:0;
+          bottom:0;
+          right:0;
+          font-family: Arial, Helvetica, sans-serif;
+          font-size: 14px;
+          color: #323232;
+          z-index: 1;
+      }
+
+      .contents {
+        position:absolute;
+        top:44px;
+        bottom:0;
+        left:0;
+        width:350px;
+        overflow-y: auto;
+        overflow-x: hidden;
+      }
+      #categorySelect {
+        margin: 5px;
+        width:340px;
+      }
+
+  </style>
+</head>
+<body>
+  <!-- Calcite combobox for category selection -->
+  <calcite-combobox id="categorySelect" placeholder="Filter by category" overlay-positioning="fixed" selection-mode="single">
+    <calcite-combobox-item value="10000" text-label="Arts and Entertainment"></calcite-combobox-item>
+    <calcite-combobox-item value="11000" text-label="Business and Professional Services"></calcite-combobox-item>
+    <calcite-combobox-item value="12000" text-label="Community and Government"></calcite-combobox-item>
+    <calcite-combobox-item value="13000" text-label="Dining and Drinking"></calcite-combobox-item>
+    <calcite-combobox-item value="15000" text-label="Health and Medicine"></calcite-combobox-item>
+    <calcite-combobox-item selected value="16000" text-label="Landmarks and Outdoors"></calcite-combobox-item>
+    <calcite-combobox-item value="17000" text-label="Retail"></calcite-combobox-item>
+    <calcite-combobox-item value="18000" text-label="Sports and Recreation"></calcite-combobox-item>
+    <calcite-combobox-item value="19000" text-label="Travel and Transportation"></calcite-combobox-item>
+  </calcite-combobox>
+  <!-- Calcite flow and list on the left for result display -->
+  <div class="contents">
+    <calcite-flow id="flow">
+      <calcite-flow-item>
+        <calcite-list id="results">
+          <calcite-notice open><div slot="message">Click on the map to search for places around a location</div></calcite-notice>
+        </calcite-list>
+      </calcite-flow-item>
+    </calcite-flow>
+  </div>
+  <!-- Element for map display -->
+  <div id="map"></div>
+  <script>
+    // Getting elements from the DOM
+    const categorySelect = document.getElementById("categorySelect");
+    const resultList = document.getElementById("results");
+    const flow = document.getElementById("flow");
+    let infoPanel;
+    // Function to set result item UI
+    const setAttribute = (heading, icon, validValue) => {
+    if (validValue) {
+      const element = document.createElement("calcite-block");
+      element.heading = heading;
+      element.description = validValue;
+
+      const attributeIcon = document.createElement("calcite-icon");
+      attributeIcon.icon = icon;
+      attributeIcon.slot = "icon";
+      attributeIcon.scale = "m";
+
+      element.appendChild(attributeIcon);
+      infoPanel.appendChild(element);
+    }
+    };
+
+    // Set API key for places service
+    const accessToken = "YOUR_ACCESS_TOKEN";
+    const basemapEnum = "arcgis/navigation";
+
+    // Set up Map object
+    const map = new ol.Map({
+        target: "map",
+        controls: ol.control.defaults.defaults({ zoom:false })
+    });
+
+    // Center the map to Hilton Berlin
+    map.setView(
+        new ol.View({
+            center: ol.proj.fromLonLat([13.393, 52.512]),
+            zoom: 19
+        })
+    )
+
+    // Set basemap 
+    olms.apply(map, `https://basemapstyles-api.arcgis.com/arcgis/rest/services/styles/v2/styles/${basemapEnum}?token=${accessToken}`)
+    .then(map => {
+        // Add layer to display search area
+        searchArea = new ol.layer.Vector();
+        map.addLayer(searchArea)
+        // Add layer to display found places
+        placesLayer = new ol.layer.Vector({
+          source: new ol.source.Vector(),
+
+          style: new ol.style.Style({
+            image: new ol.style.Icon({
+                anchor: [0.5, 0.99],
+                anchorXUnits: 'fraction',
+                anchorYUnits: 'fraction',
+                scale:0.3,
+                src: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAHgAAAB5CAYAAADyOOV3AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAZdEVYdFNvZnR3YXJlAEFkb2JlIEltYWdlUmVhZHlxyWU8AAADKGlUWHRYTUw6Y29tLmFkb2JlLnhtcAAAAAAAPD94cGFja2V0IGJlZ2luPSLvu78iIGlkPSJXNU0wTXBDZWhpSHpyZVN6TlRjemtjOWQiPz4gPHg6eG1wbWV0YSB4bWxuczp4PSJhZG9iZTpuczptZXRhLyIgeDp4bXB0az0iQWRvYmUgWE1QIENvcmUgNS42LWMwMTQgNzkuMTU2Nzk3LCAyMDE0LzA4LzIwLTA5OjUzOjAyICAgICAgICAiPiA8cmRmOlJERiB4bWxuczpyZGY9Imh0dHA6Ly93d3cudzMub3JnLzE5OTkvMDIvMjItcmRmLXN5bnRheC1ucyMiPiA8cmRmOkRlc2NyaXB0aW9uIHJkZjphYm91dD0iIiB4bWxuczp4bXA9Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC8iIHhtbG5zOnhtcE1NPSJodHRwOi8vbnMuYWRvYmUuY29tL3hhcC8xLjAvbW0vIiB4bWxuczpzdFJlZj0iaHR0cDovL25zLmFkb2JlLmNvbS94YXAvMS4wL3NUeXBlL1Jlc291cmNlUmVmIyIgeG1wOkNyZWF0b3JUb29sPSJBZG9iZSBQaG90b3Nob3AgQ0MgMjAxNCAoTWFjaW50b3NoKSIgeG1wTU06SW5zdGFuY2VJRD0ieG1wLmlpZDozQjg2NjYzRjZDNDkxMUU0QTM3RThDNzNCRDk3QTcyQSIgeG1wTU06RG9jdW1lbnRJRD0ieG1wLmRpZDozQjg2NjY0MDZDNDkxMUU0QTM3RThDNzNCRDk3QTcyQSI+IDx4bXBNTTpEZXJpdmVkRnJvbSBzdFJlZjppbnN0YW5jZUlEPSJ4bXAuaWlkOjNCODY2NjNENkM0OTExRTRBMzdFOEM3M0JEOTdBNzJBIiBzdFJlZjpkb2N1bWVudElEPSJ4bXAuZGlkOjNCODY2NjNFNkM0OTExRTRBMzdFOEM3M0JEOTdBNzJBIi8+IDwvcmRmOkRlc2NyaXB0aW9uPiA8L3JkZjpSREY+IDwveDp4bXBtZXRhPiA8P3hwYWNrZXQgZW5kPSJyIj8+51b2xQAABXZJREFUeF7t3YttG1cQhWGX4BJSQkpICSnBpaSDlOASUoJLSAkpISUoO4RoMEc/xb374M97cQf4YOBI4nJmQC65evjL29vbNDAMp3FgOI0Dw2kcGE7jwHAaB4bTODCcxoHhNA4Mp3FgOI0Dw2kcGE7jwNCys74uflv8sfhr8WPx76Ju+JH6vPr8+rr6+rqdur3NRf0ZMLRsqF8Xfy7+Xtwu7Ch1u3X7dZymov4MGFoa6tvirKXeU8er464q6s+AoWVF1YD/WdwO/tnq+A8XTf0ZMLR8Ur8s6hx5O2hb3Z+6X1jUnwFDy52q89/aF0vPVvcLz8/UnwFDC1Q9Fd4O9FV9eMqm/gwYWqJe+ZGbPjySqT8DhpabqvegvSz3qu7vz/fO1J8BQ8tNfV/cDq8Xdb8vRf0ZMLS8V70yvR1aby6vrKk/A4aW9+r10Xt1eRRTfwYMLUvVOex2WEep82O9b63LjnWtuf5tuVbd6iv1Z8DQstTRb4vq0fToOnJ9/OhnjW/UnwFDy1JHDbq+K3T3KtOdqs+vr6Pba/Wd+jNgaFnqiMuRD68TP6gjnkV+UH8GDC0xpC32Lvdau5ecvVkwtOSQGh213GvtWnL2ZsHQkkNqUOfOM2rzOTl7s2BoySE1aH1BtbY2X3TJ3iwYWnJIK10uLJxYm17ZZ28WDC05pJUevc/dW3X7dNxPZW8WDC05pBXqStQzqvmKV/ZmwdCSQ1qh3jc/o5rfn2dvFgwtOaQVzj7/Xqv5PJy9WTC05JBWqG8cPKPqOHT8u7I3C4aWHNIKZ73/zWp+P5y9WTC05JBWmOfgBzC05JBWekbRcT+VvVkwtOSQVvp9cWbV7dNxP5W9WTC05JBWOvs8vOl6dPZmwdCSQ2pw1tWsTVexSvZmwdCSQ2pw1out5hdXV9mbBUNLDqlR/SDdkVW3R8dZJXuzYGjJIW0wf6IjYGjJIW2095G865F7lb1ZMLTkkHao38avv7PRUvX5h/3VgOzNgqElh3SAepFUT7f3fuKj8vr45hdT92RvFgwtOaSDXX+74eqs32q4yN4sGFpySD3L3iwYWnJIPcveLBhackg9y94sGFpySD3L3iwYWnJIPcveLBhackg9y94sGFpySD3L3iwYWnJIPcveLBhackg9y94sGFpySD3L3iwYWnJIPcveLBhackg9y94sGFpySD3L3iwYWnJIPcveLBhackg9y94sGFpySD3L3iwYWnJIPcveLBhackg9y94sGFpySD3L3iwYWnJIPcveLBhackg9y94sGFpySD3L3iwYWnJIPcveLBhackg9y94sGFpySD3L3iwYWnJIPcveLBhackg9y94sGFpySD3L3iwYWnJIPcveLBhackg9y94sGFpySD3L3iwYWnJIPcveLBhaltr9x09exPyfz8h79b7kuv/YnwFDy031uuTLcquoPwOGlqjelvxzuVXUnwFDC1QvS/7fcquoPwOGljv16kv+sNwq6s+AoeWTetUl43KrqD8DhpYH9WpLvrvcKurPgKFlRb3Kkj9dbhX1Z8DQsrLsJT9cbhX1Z8DQ0lDWklctt4r6M2BoaaxnL3n1cquoPwOGlg31rCU3LbeK+jNgaNlYZy+5eblV1J8BQ8uOOmvJm5ZbRf0ZMLTsrKOXvHm5VdSfAUPLAXXUknctt4r6M2BoOaj2Lnn3cquoPwOGlgNr65IPWW4V9WfA0HJwtS75sOVWUX8GDC0n1NolH7rcKurPgKHlpHq05MOXW0X9GTC0nFj3lnzKcquoPwOGlpMrl3zacquoPwOGlifUdcmnLreK+jNgOI0Dw2kcGE7jwHAaB4bTODCcxoHhNA4Mp3FgOI0Dw2kcGE7jwHAaxduX/wD39UwPVEJ3/AAAAABJRU5ErkJggg=='
+            })
+          })
+
+        });
+        map.addLayer(placesLayer);
+
+    })
+    // Set up authentication manager from API key
+    const authentication = arcgisRest.ApiKeyManager.fromKey(accessToken);
+
+    // Set default active category to landmarks and outdoors. 
+    // Available categories can be found at https://developers.arcgis.com/documentation/mapping-and-location-services/place-finding/places-category-finder/
+    let activeCategory = "16000";
+    let userLocation, clickedPoint;
+
+    // Set search radius to 750 meters. Max is 10000 meters.
+    const searchRadius = 750;
+
+    // Create popup if user clicks on result in the list
+    const popup = new Popup();
+    map.addOverlay(popup);
+
+    // When user clicks on the map, get the location and perform search for places
+    map.on('click', e => {
+        userLocation = e.coordinate;
+
+        // Create a point to show the search area
+        const point = new ol.Feature({
+            geometry: new ol.geom.Circle(e.coordinate, searchRadius*1.1)
+        });
+        searchArea.setSource(new ol.source.Vector({
+            features: [point]
+        }));
+
+        // Perform places search
+        showPlaces()
+
+    });
+
+    // If user changes category, update active category and perform search
+    categorySelect.addEventListener("calciteComboboxChange", e => {
+        activeCategory = categorySelect.value;
+
+        if (userLocation) showPlaces();
+
+    });
+
+    // Perform request to find places near a point using REST JS
+    function showPlaces() {
+        // Clear previous results
+        if (infoPanel) infoPanel.remove();
+        popup.hide();
+
+        // Transform user location to lat/long in WGS84 SR
+        const lngLat = ol.proj.transform(userLocation, "EPSG:3857", "EPSG:4326");
+        // Perform request to find places near a point
+        arcgisRest.findPlacesNearPoint({
+            x: lngLat[0],
+            y: lngLat[1],
+            categoryIds: activeCategory,
+            radius: searchRadius,
+            authentication
+        })
+        .then((response)=>{
+            // Clear previous results
+            placesLayer.getSource().clear();
+            resultList.innerHTML = "";
+
+            const places = [];
+            
+            response.results.forEach((result)=>{
+                // Transform location to map projection
+                const location = ol.proj.transform([result.location.x,result.location.y], "EPSG:4326", "EPSG:3857");
+                // Create a marker for each place
+                const marker = new ol.Feature({
+                    geometry: new ol.geom.Point(location),
+
+                    name: result.name,
+                    id: result.placeId,
+                    category: result.categories[0].label,
+                    distance: (result.distance / 1000).toFixed(1)
+
+                });
+                places.push(marker);
+                // Add result to the list
+                addToList(marker);
+
+            });
+            // Add markers to the map
+            const source = new ol.source.Vector({features: places});
+            placesLayer.setSource(source)
+
+        });
+
+    };
+
+    function addToList(marker) {
+        // Create HTML elements for each result
+        const infoDiv = document.createElement("calcite-list-item");
+        resultList.appendChild(infoDiv);
+
+        infoDiv.label = marker.get('name');
+        infoDiv.description = marker.get('category') + "-" + marker.get('distance') + "km";
+        // Add click event to show details when user clicks on result
+        infoDiv.addEventListener("click",e => {
+            popup.show(marker.getGeometry().flatCoordinates, marker.get('name'))
+
+            getDetails(marker);
+
+        })
+
+    }
+
+    function getDetails(marker) {
+        // Get details for a place using REST JS
+        arcgisRest.getPlaceDetails({
+            placeId: marker.get('id'),
+            requestedFields: ["all"],
+            authentication
+        })
+        .then((result)=>{
+            // Center the map to the marker
+            map.getView().animate({
+                center:marker.getGeometry().flatCoordinates,
+                duration:300
+            });
+
+            // Set up the info panel for selected place
+            infoPanel = document.createElement("calcite-flow-item");
+            flow.appendChild(infoPanel);
+
+            const placeDetails = result.placeDetails;
+            infoPanel.heading = placeDetails.name;
+            infoPanel.description = placeDetails.categories[0].label;
+
+            setAttribute("Description", "information", placeDetails?.description);
+            setAttribute("Address", "map-pin", placeDetails?.address?.streetAddress);
+            setAttribute("Phone", "mobile", placeDetails?.contactInfo?.telephone);
+            setAttribute("Hours", "clock", placeDetails?.hours?.openingText);
+            setAttribute("Rating", "star", placeDetails?.rating?.user);
+            setAttribute("Email", "email-address", placeDetails?.contactInfo?.email);
+            setAttribute("Website", "information", placeDetails?.contactInfo?.website?.split("://")[1].split("/")[0]);
+            setAttribute("Facebook", "speech-bubble-social", (placeDetails?.socialMedia?.facebookId) ? `www.facebook.com/${placeDetails.socialMedia.facebookId}` : null);
+            setAttribute("Twitter", "speech-bubbles", (placeDetails?.socialMedia?.twitter) ? `www.twitter.com/${placeDetails.socialMedia.twitter}` : null);
+            setAttribute("Instagram", "camera", (placeDetails?.socialMedia?.instagram) ? `www.instagram.com/${placeDetails.socialMedia.instagram}` : null);
+
+            // Close popup when user goes back
+            infoPanel.addEventListener("calciteFlowItemBack", e => {
+                popup.hide();
+            })
+
+        });
+
+    }
+
+    </script>
+</body>
+</html>

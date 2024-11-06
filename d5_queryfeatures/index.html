@@ -1,0 +1,197 @@
+<!--
+https://developers.arcgis.com/maplibre-gl-js/query-and-edit/query-a-feature-layer-spatial/
+
+To run this demo, you need to replace 'YOUR_ACCESS_TOKEN' with an access token from ArcGIS that has the correct privileges.
+
+To get started, sign up for a free ArcGIS Location Platform account or a free trial of ArcGIS Online and create developer credentials.
+
+https://developers.arcgis.com/documentation/security-and-authentication/get-started/
+
+-->
+
+
+<html>
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no" />
+    <script src=https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.js></script>
+    <link href=https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.css rel="stylesheet" />
+
+    <link rel="stylesheet" href="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-draw/v1.4.2/mapbox-gl-draw.css" type="text/css" />
+    <script src="https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-draw/v1.4.2/mapbox-gl-draw.js"></script>
+
+    <script src="https://unpkg.com/@esri/arcgis-rest-request@4/dist/bundled/request.umd.js"></script>
+    <script src="https://unpkg.com/@esri/arcgis-rest-feature-service@4/dist/bundled/feature-service.umd.js"></script>
+
+    <script src="https://unpkg.com/@terraformer/arcgis@2.1.2/dist/t-arcgis.umd.js"></script>
+
+    <style>
+      html,
+      body,
+      #map {
+        padding: 0;
+        margin: 0;
+        height: 100%;
+        width: 100%;
+        font-family: Arial, Helvetica, sans-serif;
+        font-size: 14px;
+        color: #323232;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div id="map"></div>
+    <script>
+      // Set API key for ArcGIS
+      const accessToken = "YOUR_ACCESS_TOKEN";
+
+      const basemapEnum = "arcgis/streets";
+      // Set Map object
+      const map = new maplibregl.Map({
+        container: "map", // the id of the div element
+        style: `https://basemapstyles-api.arcgis.com/arcgis/rest/services/styles/v2/styles/${basemapEnum}?token=${accessToken}`,
+        zoom: 12, // starting zoom
+
+        center: [13.393, 52.512] // starting location [longitude, latitude]
+
+      });
+
+      MapboxDraw.constants.classes.CONTROL_BASE = "maplibregl-ctrl";
+      MapboxDraw.constants.classes.CONTROL_PREFIX = "maplibregl-ctrl-";
+      MapboxDraw.constants.classes.CONTROL_GROUP = "maplibregl-ctrl-group";
+
+      // Add draw controls
+      const draw = new MapboxDraw({
+        displayControlsDefault: false, // Don't add any tools other than those below
+        controls: {
+          point: true,
+          line_string: true,
+          polygon: true
+        }
+      });
+      map.addControl(draw, "top-left");
+
+      // Set up function to add query layers to the map
+      function addQueryLayers() {
+        map.addSource("query", {
+          type: "geojson",
+          data: {
+            type: "FeatureCollection",
+            features: []
+          }
+        });
+        map.addLayer({
+          id: "query-line",
+          type: "line",
+          source: "query",
+          paint: {
+            "line-color": "hsl(140, 0%, 30%)",
+            "line-width": 2,
+            "line-dasharray": [2, 2]
+          }
+        });
+        map.addLayer({
+          id: "query-fill",
+          type: "fill",
+          source: "query",
+          paint: {
+            "fill-color": "hsl(140, 0%, 50%)",
+            "fill-opacity": 0.2
+          },
+          filter: ["==", ["geometry-type"], "Polygon"]
+        });
+
+        map.addLayer({
+          id: "query-circle",
+          type: "circle",
+          source: "query",
+          paint: {
+            "circle-color": "hsl(140, 0%, 30%)"
+          },
+          filter: ["==", ["geometry-type"], "Point"]
+        });
+      }
+      // Set up function to add parcel layers to the map
+      function addParcelLayers() {
+        map.addSource("parcels", {
+          type: "geojson",
+          data: {
+            type: "FeatureCollection",
+            features: []
+          }
+        });
+        map.addLayer({
+          id: "parcels-fill",
+          source: "parcels",
+          type: "fill",
+
+          paint: {
+            "fill-color": "hsl(200, 80%, 50%)",
+            "fill-opacity": 0.5,
+            "fill-outline-color": "white"
+          }
+        });
+      }
+      // After map loads, add parcel and query layers
+      map.on("load", () => {
+
+        addParcelLayers();
+
+        addQueryLayers();
+      });
+
+      // After user draws a shape, query the parcels
+      map.on("draw.create", (e) => {
+
+        // Get the drawn shape and add it to the query layer
+        const feature = e.features[0];
+        map.getSource("query").setData(feature);
+        draw.deleteAll();
+
+        // Transform geoJson to ArcGIS format
+        const geometry = Terraformer.geojsonToArcGIS(feature.geometry);
+        let geometryType = "esriGeometry" + feature.geometry.type;
+        if (feature.geometry.type === "LineString") {
+          geometryType = "esriGeometryPolyline";
+        }
+        // Execute the query
+        executeQuery(geometry, geometryType);
+
+      });
+
+      function executeQuery(geometry, geometryType) {
+        const ftLyrUrl = "https://services2.arcgis.com/jUpNdisbWqRpMo35/arcgis/rest/services/Bodenrichtwerte_Berlin/FeatureServer/0";
+
+        // Query the parcels
+        arcgisRest
+          .queryFeatures({
+            url: ftLyrUrl,
+            geometry: geometry,
+            geometryType: geometryType,
+            spatialRel: "esriSpatialRelIntersects",
+            f: "geojson",
+            returnGeometry: true,
+            outFields: ["bezirk", "brw", " nutzung"]
+          })
+          .then((response) => {
+            map.getSource("parcels").setData(response);
+          });
+          
+      }
+      // Add popup with feature information when user clicks it
+      map.on("click", "parcels-fill", (e) => {
+        const p = e.features[0].properties;
+        const message =
+          `<b>District ${p.bezirk}</b><br/>` +
+          `Value: ${p.brw.toLocaleString()} Eur/m2 <br>` +
+          `Usage: ${p.nutzung}`;
+
+        new maplibregl.Popup().setHTML(message).setLngLat(e.lngLat).addTo(map);
+
+      });
+
+    </script>
+  </body>
+</html>

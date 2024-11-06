@@ -1,0 +1,125 @@
+<!--
+https://developers.arcgis.com/cesiumjs/data-enrichment/query-demographic-data/
+
+
+To run this demo, you need to replace 'YOUR_ACCESS_TOKEN' with an access token from ArcGIS that has the correct privileges.
+
+To get started, sign up for a free ArcGIS Location Platform account or a free trial of ArcGIS Online and create developer credentials.
+
+https://developers.arcgis.com/documentation/security-and-authentication/get-started/
+
+-->
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>CesiumJS: Get global data</title>
+
+    <script src="https://cesium.com/downloads/cesiumjs/releases/1.121/Build/Cesium/Cesium.js"></script>
+    <link
+      href="https://cesium.com/downloads/cesiumjs/releases/1.121/Build/Cesium/Widgets/widgets.css"
+      rel="stylesheet"
+    />
+
+    <script src="https://unpkg.com/@esri/arcgis-rest-request@4/dist/bundled/request.umd.js"></script>
+    <script src="https://unpkg.com/@esri/arcgis-rest-demographics@4/dist/bundled/demographics.umd.js"></script>
+
+    <style>
+      html,
+      body,
+      #cesiumContainer {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="cesiumContainer"></div>
+    <script>
+      // Set API key for ArcGIS
+      const accessToken = "YOUR_ACCESS_TOKEN";
+      Cesium.ArcGisMapService.defaultAccessToken = accessToken;
+      const authentication = arcgisRest.ApiKeyManager.fromKey(accessToken);
+
+      // Set Cesium access token
+      const cesiumAccessToken = "YOUR_CESIUM_ACCESS_TOKEN";
+      Cesium.Ion.defaultAccessToken = cesiumAccessToken;
+
+      // Set variable for basemap
+      const arcGisImagery =
+        Cesium.ArcGisMapServerImageryProvider.fromBasemapType(
+          Cesium.ArcGisBaseMapType.SATELLITE,
+          {
+            enablePickFeatures: false,
+          }
+        );
+      // Initialize Cesium viewer
+      const viewer = new Cesium.Viewer("cesiumContainer", {
+        baseLayer: Cesium.ImageryLayer.fromProviderAsync(arcGisImagery),
+        terrain: Cesium.Terrain.fromWorldTerrain(),
+        timeline: false,
+        animation: false,
+        geocoder: false,
+      });
+
+      // Set initial camera view
+      viewer.camera.setView({
+        destination: Cesium.Cartesian3.fromDegrees(15.347, 41.361, 3000000),
+      });
+
+      // Function to get demographic data
+      function getDemographics(longitude, latitude) {
+        // Query demographic global facts data
+        arcgisRest
+          .queryDemographicData({
+            studyAreas: [{ geometry: { x: longitude, y: latitude } }],
+            dataCollections: ["KeyGlobalFacts"], // https://developers.arcgis.com/documentation/mapping-and-location-services/data-enrichment/tools/data-collection-finder/
+            authentication: authentication,
+          })
+          .then((response) => {
+            // Set feature set from response
+            const featureSet = response.results[0].value.FeatureSet;
+            let message;
+
+            // Set result data from first feature
+            if (featureSet.length > 0 && featureSet[0].features.length > 0) {
+              const attributes = featureSet[0].features[0].attributes;
+              message =
+                `<b>Data for a 1 mile search radius</b>` +
+                [
+                  `<br>Population: ${attributes.TOTPOP}`,
+                  `Males: ${attributes.TOTMALES} `,
+                  `Females: ${attributes.TOTFEMALES}`,
+                  `Average Household Size: ${attributes.AVGHHSZ}`,
+                ].join("<br>");
+            } else {
+              message = "Data not available for this location.";
+            }
+            // Show result in Cesium viewer
+            let resultEntity = new Cesium.Entity({
+              name: "Demographic results",
+              description: message,
+              position: Cesium.Cartesian3.fromDegrees(longitude, latitude),
+            });
+
+            viewer.selectedEntity = resultEntity;
+          });
+      }
+      // Query demographic data on click
+      viewer.screenSpaceEventHandler.setInputAction(function (movement) {
+        const pickedPosition = viewer.scene.pickPosition(movement.position);
+        const cartographic = Cesium.Cartographic.fromCartesian(pickedPosition);
+
+        getDemographics(
+          Cesium.Math.toDegrees(cartographic.longitude),
+          Cesium.Math.toDegrees(cartographic.latitude)
+        );
+      }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+
+      // Get demographic data for default location for initial load
+      getDemographics(12.3276, 45.4388);
+    </script>
+  </body>
+</html>
